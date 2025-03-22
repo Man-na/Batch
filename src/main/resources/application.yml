@@ -1,0 +1,28 @@
+server:
+  port: 9002
+
+spring:
+  datasource:
+    batch:
+      url: ${SPRING_BATCH_DATASOURCE_URL:jdbc:mysql://localhost:3306/batch}
+      username: ${SPRING_BATCH_DATASOURCE_USERNAME:root}
+      password: ${SPRING_BATCH_DATASOURCE_PASSWORD:test}
+
+    ting-thing:
+      url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/commerce}
+      username: ${SPRING_DATASOURCE_USERNAME:root}
+      password: ${SPRING_DATASOURCE_PASSWORD:test}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        show_sql: true
+        format_sql: true
+
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
