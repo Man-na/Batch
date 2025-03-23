@@ -23,9 +23,6 @@ public class CustomMatchingProcessor implements ItemProcessor<CustomMatching, Ma
     @Autowired
     private MatchingResultRepository matchingResultRepository;
 
-    @Autowired
-    private UserRepository userRepository;
-
     @Override
     public MatchingResult process(CustomMatching item) {
         // 현재 사용자 정보 가져오기

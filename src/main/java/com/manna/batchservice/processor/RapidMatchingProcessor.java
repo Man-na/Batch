@@ -6,6 +6,7 @@ import com.manna.batchservice.tingthing.repository.MatchingResultRepository;
 import com.manna.batchservice.tingthing.repository.RapidMatchingRepository;
 import com.manna.batchservice.tingthing.repository.UserRepository;
 import com.manna.batchservice.utils.MatchingProcessorUtils;
+import lombok.RequiredArgsConstructor;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -22,25 +23,16 @@ import java.util.stream.Collectors;
 public class RapidMatchingProcessor implements ItemProcessor<RapidMatching, MatchingResult> {
 
     @Autowired
-    private RapidMatchingRepository rapidMatchingRepository;
-
-    @Autowired
     private MatchingResultRepository matchingResultRepository;
 
     @Autowired
     private CustomMatchingRepository customMatchingRepository;
 
-    @Autowired
-    private UserRepository userRepository;
-
-    private static final int MAX_MALE_PER_MATCH = 4;
-    private static final int MAX_FEMALE_PER_MATCH = 4;
-
     private static final List<String> VALID_DAYS = List.of("월", "화", "수", "목", "금", "토", "일");
 
     @Override
     public MatchingResult process(RapidMatching item) {
-        // 우선순위 날짜 검증
+        // 우선순위 날짜 유효성 검사
         if (!VALID_DAYS.contains(item.getPriority1Day()) || (item.getPriority2Day() != null && !VALID_DAYS.contains(item.getPriority2Day()))) {
             throw new IllegalArgumentException("priority1Day 또는 priority2Day는 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.");
         }
@@ -50,7 +42,7 @@ public class RapidMatchingProcessor implements ItemProcessor<RapidMatching, Matc
         int currentUserAge = MatchingProcessorUtils.calculateAge(currentUser.getBirth());
         String currentUserGender = currentUser.getGender().toString();
 
-        // 우선순위 날짜 기반으로 가능한 날짜 계산
+        // 우선순위 날짜 기반으로 가까운 4개의 잠재 날짜 계산
         List<LocalDate> potentialDates = calculatePotentialDates(item.getPriority1Day(), item.getPriority2Day());
 
         // 기존 매칭에 참여 시도
@@ -72,11 +64,10 @@ public class RapidMatchingProcessor implements ItemProcessor<RapidMatching, Matc
             }
         }
 
-        // 적합한 기존 매칭이 없으면 CustomMatching 후보를 확인
+        // 적합한 기존 매칭이 없으면 CustomMatching에서 후보 조회
         if (matchingResult == null) {
-            LocalDate meetingDate = potentialDates.get(0); // 가장 가까운 날짜 사용
+            LocalDate meetingDate = potentialDates.get(0);
 
-            // PENDING 상태의 CustomMatching 후보 조회
             List<CustomMatching> candidates = customMatchingRepository.findByStatus(CustomMatching.MatchingStatus.PENDING)
                     .stream()
                     .filter(cm -> {
@@ -86,41 +77,45 @@ public class RapidMatchingProcessor implements ItemProcessor<RapidMatching, Matc
                     })
                     .filter(cm -> {
                         LocalDate candidateDate = LocalDate.parse(cm.getMeetingDate());
-                        return potentialDates.contains(candidateDate); // 날짜 일치 필터링
+                        return potentialDates.contains(candidateDate);
                     })
                     .collect(Collectors.toList());
 
-            // 적합한 후보가 있으면 새로운 MatchingResult 생성
             if (!candidates.isEmpty()) {
-                // CustomMatching의 location 사용
                 String location = candidates.get(0).getLocation();
 
+                // matchingResult 생성
                 matchingResult = MatchingResult.builder()
                         .matchingType(MatchingResult.MatchingType.RAPID)
                         .matchingId(item.getMatchingId())
                         .meetingDate(meetingDate)
-                        .location(location) // CustomMatching에서 가져온 location 사용
+                        .location(location)
                         .status(MatchingResult.ResultStatus.SCHEDULED)
                         .build();
 
-                // 필터링된 후보를 참여자로 추가
-                List<MatchingParticipant> participants = candidates.stream()
-                        .filter(candidate -> MatchingProcessorUtils.canAddParticipant(matchingResult, candidate.getUser().getGender().toString()))
-                        .map(candidate -> MatchingParticipant.builder()
-                                .matchingResult(matchingResult)
-                                .user(candidate.getUser())
-                                .build())
-                        .collect(Collectors.toList());
-                matchingResult.setParticipants(participants);
+                // matchingResult를 별도의 변수로 고정
+                final MatchingResult finalMatchingResult = matchingResult;
 
-                // 현재 사용자를 매칭에 추가
+                // CustomMatching 후보를 참여자로 추가하며 상태를 MATCHED로 변경
+                List<MatchingParticipant> participants = candidates.stream()
+                        .filter(candidate -> MatchingProcessorUtils.canAddParticipant(finalMatchingResult, candidate.getUser().getGender().toString()))
+                        .map(candidate -> {
+                            candidate.setStatus(CustomMatching.MatchingStatus.MATCHED);
+                            return MatchingParticipant.builder()
+                                    .matchingResult(finalMatchingResult)
+                                    .user(candidate.getUser())
+                                    .build();
+                        })
+                        .collect(Collectors.toList());
+                finalMatchingResult.setParticipants(participants);
+
+                // 현재 사용자를 참여자로 추가
                 MatchingParticipant currentParticipant = MatchingParticipant.builder()
-                        .matchingResult(matchingResult)
+                        .matchingResult(finalMatchingResult)
                         .user(currentUser)
                         .build();
-                matchingResult.getParticipants().add(currentParticipant);
+                finalMatchingResult.getParticipants().add(currentParticipant);
             } else {
-                // 후보가 없으면 MatchingResult 생성하지 않음
                 return null;
             }
         }
@@ -131,14 +126,14 @@ public class RapidMatchingProcessor implements ItemProcessor<RapidMatching, Matc
         return matchingResult;
     }
 
-    // 우선순위 날짜 기반으로 가능한 날짜 계산
+    // 우선순위 날짜 기반으로 가까운 4개 날짜 계산
     private List<LocalDate> calculatePotentialDates(String priority1Day, String priority2Day) {
         List<LocalDate> dates = new ArrayList<>();
         LocalDate now = LocalDate.now();
         for (int i = 0; i < 7; i++) {
             LocalDate date = now.plusDays(i);
             String dayOfWeek = date.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.KOREAN);
-            if (dayOfWeek.equals(priority1Day) || (priority2Day != null && dayOfWeek.equals(priority2Day))) {
+            if (dayOfWeek.equals(priority1Day) || (dayOfWeek.equals(priority2Day))) {
                 dates.add(date);
                 if (dates.size() == 4) break;
             }

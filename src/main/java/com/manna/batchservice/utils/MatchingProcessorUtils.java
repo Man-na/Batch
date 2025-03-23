@@ -1,6 +1,6 @@
 package com.manna.batchservice.utils;
 
-import com.manna.batchservice.tingthing.entity.CustomMatching;
+import com.manna.batchservice.common.constants.Enums;
 import com.manna.batchservice.tingthing.entity.MatchingResult;
 
 import java.time.LocalDate;
@@ -18,7 +18,7 @@ public class MatchingProcessorUtils {
     }
 
     // 나이 조건 체크 메서드
-    public static boolean isAgeMatch(CustomMatching.AgePreference preference, int currentAge, int candidateAge) {
+    public static boolean isAgeMatch(Enums.AgePreference preference, int currentAge, int candidateAge) {
         switch (preference) {
             case PEER:
                 return Math.abs(currentAge - candidateAge) <= 3;
